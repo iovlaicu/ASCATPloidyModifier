@@ -14,13 +14,13 @@ library(dipsaus)
 #source("plotSunrise2.R")
 #source("myplotSol.R")
 source("PlotASCATAdjusted.R")
-source("plotSUnriseASCAT.R")
+source("plotSunriseASCAT.R")
 source("PlotLogRASCAT.R")
 source("refitProfile_ASCAT.R")
 source("plotSegmentedASCAT.R")
 
 reslocal <- NULL
-
+bclocal <- NULL
 pathrdata <- NULL
 rdata <- NULL
 coords <- NULL
@@ -56,7 +56,7 @@ ui <- navbarPage(id="nav_page",
                  tabPanel("Welcome",
                           busy_start_up(
                             loader = tags$img(
-                              src = "Loader.gif",
+                              src = "LoaderASCAT.gif",
                               width = 700
                             ),
                             text = "Loading ...",
@@ -368,11 +368,11 @@ server <- function(input, output, session) {
   
       }
       
-      if(!"manual"%in%names(bclocal))
-      {
-        bclocal$manual <<- bclocal
-
-      }
+      # if(!"manual"%in%names(bclocal))
+      # {
+      #   bclocal$manual <<- bclocal
+      # 
+      # }
       
     
       output$profile <- renderPlot({isolate(plot2 <- ascat.plotAdjustedAscatProfile(reslocal$original, SAMPLE=names(reslocal$original$purity)[[1]], REF="hg38")) })
@@ -414,10 +414,12 @@ server <- function(input, output, session) {
       
       
       reslocal$manual <<- reslocal$original
-      bclocal$manual <<- bclocal
+      #bclocal$manual <<- bclocal
     
     #}
-    
+      coords$y <<- NULL
+      coords$x <<- NULL
+      highlight <<- NULL
     #else{
       #return (NULL)
     #}
@@ -503,7 +505,9 @@ server <- function(input, output, session) {
       {
         
         d <- reslocal$manual$distance_matrix[[1]]
-        print(d)
+        #print(d)
+        #print("####### Matrix before refit #######")
+        #print(reslocal$manual$distance_matrix[[1]])
         
         purity <- coords$y
         ploidy <- coords$x
@@ -521,7 +525,7 @@ server <- function(input, output, session) {
         if(optValue()){
           
           best <- 1
-          print(localOpt)
+          #print(localOpt)
           #print(localOpt$bao)
           
           dist <- crossdist(ploidy, purity, as.numeric(rownames(d)[localOpt[best, 1]]), as.numeric(colnames(d)[localOpt[best, 2]]))
@@ -546,7 +550,7 @@ server <- function(input, output, session) {
           purity <- as.numeric(colnames(d)[localOpt[best, 2]])
           
         }
-        
+       
         newprofile <- ascat.runAscat(bclocal, rho_manual=purity, psi_manual=ploidy)
         
         reslocal$manual$ploidy[[1]] <- ploidy
@@ -555,13 +559,17 @@ server <- function(input, output, session) {
         reslocal$manual$segments <<- newprofile$segments
       
         reslocal$manual$psi <<- newprofile$psi
-        reslocal$manual$distance_matrix <<- newprofile$distance_matrix
         
+        #print(newprofile$distance_matrix[[1]])
+        #reslocal$manual$distance_matrix[[1]] <<- newprofile$distance_matrix[[1]]
+        
+        #print("####### Matrix after refit #######")
+        #print(reslocal$manual$distance_matrix[[1]])
         #print(reslocal$manual$distance_matrix)
         
         output$profile2 <- renderPlot({isolate(plot2 <- ascat.plotAdjustedAscatProfile(newprofile, SAMPLE=names(reslocal$original$purity)[[1]], REF="hg38", hideSeg=hideCN(), plot_unrounded = plotRawSeg())) })
         
-        output$sunrise2 <- renderPlot({isolate( localOpt <<- ascat.plotSunrise(reslocal$manual$distance_matrix[[1]], psi_opt1 = reslocal$manual$ploidy[[1]], rho_opt1 = reslocal$manual$purity[[1]], optima=TRUE))})
+          output$sunrise2 <- renderPlot({isolate( localOpt <<- ascat.plotSunrise(reslocal$manual$distance_matrix[[1]], psi_opt1 = reslocal$manual$ploidy[[1]], rho_opt1 = reslocal$manual$purity[[1]], optima=TRUE))})
         
       
       coords$y <<- NULL
@@ -616,20 +624,13 @@ server <- function(input, output, session) {
           output$profile2 <- renderPlot({isolate(plot2 <- ascat.plotAdjustedAscatProfile(reslocal$manual, SAMPLE=names(reslocal$original$purity)[[1]], REF="hg38", hideSeg=hideCN(), plot_unrounded = plotRawSeg(), highlight=highlight)) 
             
         
-          #if (length(points_x) > 0) {
-            
-            #input$profile2_click
-            
-            
-            #for (i in 1:length(points_x)) {
+       
               
               x <- points_x[2]
               y <- points_y[2]
               
               points(x, y, col = "chartreuse", pch = 4, cex = 4)
               
-            #}
-          #}
           })
          
         }
@@ -650,32 +651,25 @@ server <- function(input, output, session) {
         }
         
      
-        if(length(points_x)>=4){
+        if(length(points_x)==4){
           
-          print(highlight)
+    
           output$profile2 <- renderPlot({isolate(plot2 <- ascat.plotAdjustedAscatProfile(reslocal$manual, SAMPLE=names(reslocal$original$purity)[[1]], REF="hg38", hideSeg=hideCN(), plot_unrounded = plotRawSeg(), highlight=highlight)) 
             
+
+          x <- points_x[c(2,4)]
+          y <- points_y[c(2,4)]
             
-            #if (length(points_x) > 0) {
+          points(x, y, col = "chartreuse", pch = 4, cex = 4)
             
-            #input$profile2_click
-            
-            
-            #for (i in 1:length(points_x)) {
-            
-            x <- points_x[c(2,4)]
-            y <- points_y[c(2,4)]
-            
-            points(x, y, col = "chartreuse", pch = 4, cex = 4)
-            
-            #}
-            #}
+       
           })
           
-          
-          #coords$y <<- NULL
-          #coords$x <<- NULL
-          #highlight <<- NULL
+        }
+        if(length(points_x)>4){
+          coords$y <<- NULL
+          coords$x <<- NULL
+          highlight <<- NULL
         }
           })
     
@@ -764,7 +758,7 @@ server <- function(input, output, session) {
           ind <- which(seg$startpos==segment_info$startpos)
            
           
-          rescopy$manual <- refitProfileASCAT(rescopy$manual, refMinor=refMinor, refMajor=refMajor, chr= chr, gamma=1, wm=ind) 
+          rescopy$manual <- refitProfileASCAT(rescopy$manual, refMinor=refMinor, refMajor=refMajor, chr= chr, gamma=0.55, wm=ind) 
           
           rescopy$original <- reslocal$original
           
@@ -814,7 +808,7 @@ server <- function(input, output, session) {
         rescopy$original <- rescopy$manual
         
        
-        rescopy$manual <- refitProfileASCAT(rescopy$manual, refMinor=vals[[3]], refMajor=vals[[2]], chr= vals[[1]], gamma=1) 
+        rescopy$manual <- refitProfileASCAT(rescopy$manual, refMinor=vals[[3]], refMajor=vals[[2]], chr= vals[[1]], gamma=0.55) 
         
         rescopy$original <- reslocal$original
        
@@ -843,32 +837,6 @@ server <- function(input, output, session) {
     
   })
 
-  #########################################################################
-  
-  ######################## VIEW ###########################################
-  
-  #########################################################################
-  
-  # observeEvent(input$view,{
-  #   vals(input$samples)
-  #   
-  #   if(! is.null(sampleName())){
-  #     #index <- getIndex(sampleName())
-  #     
-  #     output$profile <- renderPlot({isolate(plot2 <- ascat.plotAdjustedAscatProfile(reslocal, SAMPLE=sampleName(), REF="hg38")) })
-  #     
-  #     output$profile2 <- renderPlot({isolate(plot2 <- ascat.plotAdjustedAscatProfile(reslocal$manual, SAMPLE=sampleName(), REF="hg38", hideSeg=hideCN(), plot_unrounded = plotRawSeg())) })
-  #     
-  #     output$sunrise1 <- renderPlot({isolate(ascat.plotSunrise(reslocal$distance_matrix[[sampleName()]], psi_opt1 = reslocal$manual$ploidy[[sampleName()]], rho_opt1 = reslocal$manual$purity[[sampleName()]]))})
-  #   
-  #     output$sunrise2 <- renderPlot({isolate( ascat.plotSunrise(reslocal$manual$distance_matrix[[sampleName()]], psi_opt1 = reslocal$manual$ploidy[[sampleName()]], rho_opt1 = reslocal$manual$purity[[sampleName()]]))})
-  #     
-  #   }
-  #   else{
-  #     return (NULL)
-  #   }
-  # })
-  
 
 #########################################################################
 
@@ -884,7 +852,7 @@ observeEvent(input$logR,{
     #index <- getIndex(sampleName())
     if(input$logR) {
      
-        output$profile <- renderPlot({newPlot <<- myascat.plotSegmentedData(bclocal$manual)})
+        output$profile <- renderPlot({newPlot <<- myascat.plotSegmentedData(bclocal)})
 
     }
     
@@ -908,7 +876,7 @@ observeEvent(input$logR,{
       if(input$BAF) {
         
 
-          output$profile <- renderPlot({newPlot <<- myascat.plotSegmentedData(bclocal$manual, plotLogR=FALSE)})
+          output$profile <- renderPlot({newPlot <<- myascat.plotSegmentedData(bclocal, plotLogR=FALSE)})
 
       }
       
