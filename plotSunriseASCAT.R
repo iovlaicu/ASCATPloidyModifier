@@ -19,33 +19,15 @@ ascat.plotSunrise<-function(d, psi_opt1, rho_opt1, minim=TRUE, optima=FALSE) {
     
     if(optima) {
       
-      bao1 <- findLocalMinima(d)
+        bao1 <- findLocalMinima(d)
+        ao <- bao1$bao
+        
+        text((ao[,1] - 0.5) / nrow(d),
+             (ao[,2] - 0.5) / ncol(d),
+             label = 1:nrow(ao),
+             col = "chartreuse", pch = 19)
       
-      ao <- bao1$bao
-      #print(ao)
-      #msg = ao
-      
-      #cmd = paste0("echo ", msg)
      
-      new_pl <- as.numeric(rownames(d)[ao[,1]])
-      new_pr <- as.numeric(colnames(d)[ao[,2]])
-      
-      # cmd = paste0("echo ", new_pl)
-      # system(cmd)
-      
-      text((new_pl-ploidy_min) / (ploidy_max-ploidy_min),
-           (new_pr-purity_min) / (purity_max-purity_min), label=1:nrow(ao),
-           col = "chartreuse", pch = 19)
-      
-      
-      #ao <- bao1$ao
-      # if(plotClust){
-      #   text(ao[,2]/ncol(errs),
-      #        1-ao[,1]/nrow(errs), label=1:nrow(ao),
-      #        col = RColorBrewer::brewer.pal(12,"Paired")[bao1$clusts], cex=.6)
-      #   
-      # }
-      
     }
     
     PLOIDY_LABELS=seq(ploidy_min, ploidy_max, length.out=max(c((ploidy_max-ploidy_min)+1, 2)))
@@ -58,10 +40,17 @@ ascat.plotSunrise<-function(d, psi_opt1, rho_opt1, minim=TRUE, optima=FALSE) {
     axis(2, at = round((PURITY_LABELS-purity_min) / (purity_max-purity_min),2), labels = PURITY_LABELS)
     
     if (psi_opt1>0 && rho_opt1>0) {
-      points((psi_opt1-ploidy_min) / (ploidy_max-ploidy_min), (rho_opt1-purity_min) / (purity_max-purity_min), col="green", pch=4, cex = 2)
-    }
+  
+        psi_index <- which.min(abs(as.numeric(rownames(d)) - psi_opt1))
+        rho_index <- which.min(abs(as.numeric(colnames(d)) - rho_opt1))
+        points((psi_index - 0.5) / nrow(d), 
+               (rho_index - 0.5) / ncol(d), 
+               col = "green", pch = 4, cex = 2)
+      
+      
+      }
     
-    ao
+    if (optima) ao else invisible(NULL)
   
   },
   error=function(e) {
@@ -72,7 +61,3 @@ ascat.plotSunrise<-function(d, psi_opt1, rho_opt1, minim=TRUE, optima=FALSE) {
   })
 
 }
-
-#distance_marix <- ascat.output$distance_matrix[[1]]
-
-#ascat.plotSunrise(distance_marix, psi_opt1 = res_ASCAT$allSolutions[[1]]$ploidy, rho_opt1 = res_ASCAT$allSolutions[[1]]$purity)

@@ -1,9 +1,7 @@
 myascat.plotRawData = function(ASCATobj, logr.y_values=c(-2, 2)) {
  
   for (i in 1:dim(ASCATobj$Tumor_LogR)[2]) {
-    #png(filename = file.path(img.dir, paste(img.prefix, ASCATobj$samples[i], ".tumour.png", sep="")), width = 2000, height = 1000, res = 200)
-    #par(mar = c(0.5, 5, 5, 0.5), mfrow = c(2, 1), cex = 0.4, cex.main=3, cex.axis = 2, pch = ifelse(dim(ASCATobj$Tumor_LogR)[1]>100000, ".", 20))
-    p <- plot(c(1, dim(ASCATobj$Tumor_LogR)[1]), logr.y_values, type = "n", xaxt = "n", main = paste(ASCATobj$samples[i], ", LogR", sep = ""), xlab = "", ylab = "")
+     p <- plot(c(1, dim(ASCATobj$Tumor_LogR)[1]), logr.y_values, type = "n", xaxt = "n", main = paste(ASCATobj$samples[i], ", LogR", sep = ""), xlab = "", ylab = "")
     p <- p + points(ASCATobj$Tumor_LogR[, i], col="red")
     p <- p + points(ASCATobj$Tumor_LogR[, i], col="#77000011")
     p <- p + abline(v=0.5, lty=1, col="lightgrey")

@@ -15,8 +15,8 @@ ascat.plotAdjustedAscatProfile=function(ASCAT_output_object, REF, SAMPLE, y_limi
   SEGMENTS=ASCAT_output_object$segments
   SEGMENTS$nMajor=SEGMENTS$nMajor-0.1
   SEGMENTS$nMinor=SEGMENTS$nMinor+0.1
-  colourA = "#E03546" # red
-  colourB = "#3557E0" # blue
+  colourA = "#E03546" 
+  colourB = "#3557E0" 
   
   colourH = "chartreuse"
   
@@ -49,7 +49,6 @@ ascat.plotAdjustedAscatProfile=function(ASCAT_output_object, REF, SAMPLE, y_limi
   SEGMENTS$chr=gsub("^chr", "", SEGMENTS$chr)
   nonrounded$chr=gsub("^chr", "", nonrounded$chr)
   
-  #stopifnot(all(ASCAT_output_object$segments$chr %in% REF$chrom))
   REF$size=REF$end-REF$start+1
   REF$middle=0
   for (i in 1:nrow(REF)) {
@@ -90,25 +89,28 @@ ascat.plotAdjustedAscatProfile=function(ASCAT_output_object, REF, SAMPLE, y_limi
   }; rm(CHR)
   
   
-  SEGS=SEGMENTS#[which(SEGMENTS$sample==SAMPLE), ]
-  SEGS_nonrounded=nonrounded #[which(nonrounded$sample==SAMPLE), ]
-  #if (nrow(SEGS)==0) warning(paste0("No segments for sample: ", SAMPLE))
-  maintitle = paste("Ploidy: ", sprintf("%1.2f", ASCAT_output_object$ploidy[1]), ", purity: ", sprintf("%2.0f", ASCAT_output_object$purity[1]*100), "%, goodness of fit: ", sprintf("%2.1f", ASCAT_output_object$goodnessOfFit[1]), "%", ifelse(isTRUE(ASCAT_output_object$nonaberrantarrays[1]), ", non-aberrant", ""), sep="")
-  #png(filename = paste0(png_prefix, SAMPLE, ".adjusted", ifelse(plot_unrounded, "rawprofile", "ASCATprofile"), ".png"), width = 2000, height = (y_limit*100), res = 200)
-  par(mar = c(0.5, 5, 5, 0.5), cex = 0.4, cex.main=3, cex.axis = 2.5)
+  SEGS=SEGMENTS
+  SEGS_nonrounded=nonrounded 
+   maintitle = paste("Ploidy: ", sprintf("%1.2f", ASCAT_output_object$ploidy[1]), ", purity: ", sprintf("%2.0f", ASCAT_output_object$purity[1]*100), "%, goodness of fit: ", sprintf("%2.1f", ASCAT_output_object$goodnessOfFit[1]), "%", ifelse(isTRUE(ASCAT_output_object$nonaberrantarrays[1]), ", non-aberrant", ""), sep="")
+   par(mar = c(0.5, 5, 5, 0.5), cex = 0.4, cex.main=3, cex.axis = 2.5)
   ticks=seq(0, y_limit, 1)
   plot(c(1, REF$cumul[nrow(REF)]), c(0, y_limit), type = "n", xaxt = "n", yaxt="n", main = maintitle, xlab = "", ylab = "")
   axis(side = 2, at = ticks)
   abline(h=ticks, col="lightgrey", lty=1)
   
   
-  #segments(SEGS_nonrounded$startpos_adjusted, (SEGS_nonrounded$nMajor-0.07), SEGS_nonrounded$endpos_adjusted, (SEGS_nonrounded$nMajor+0.07), col=colourAN)
-  #segments(SEGS_nonrounded$startpos_adjusted, (SEGS_nonrounded$nMinor-0.07), SEGS_nonrounded$endpos_adjusted, (SEGS_nonrounded$nMinor+0.07), col=colourBN)
-  if(plot_unrounded){
+   if(plot_unrounded){
     
-    rect(SEGS_nonrounded$startpos_adjusted, (SEGS_nonrounded$nMajor-0.07), SEGS_nonrounded$endpos_adjusted, (SEGS_nonrounded$nMajor+0.07), col=ifelse(SEGS_nonrounded$nMajor>=y_limit, adjustcolor(colourAN, red.f=0.75, green.f=0.75, blue.f=0.75, red.f=0.75, green.f=0.75, blue.f=0.75), colourAN), border=ifelse(SEGS_nonrounded$nMajor>=y_limit, adjustcolor(colourAN, red.f=0.75, green.f=0.75, blue.f=0.75), colourAN))
-    rect(SEGS_nonrounded$startpos_adjusted, (SEGS_nonrounded$nMinor-0.07), SEGS_nonrounded$endpos_adjusted, (SEGS_nonrounded$nMinor+0.07), col=ifelse(SEGS_nonrounded$nMinor>=y_limit, adjustcolor(colourBN, red.f=0.75, green.f=0.75, blue.f=0.75), colourBN), border=ifelse(SEGS_nonrounded$nMinor>=y_limit, adjustcolor(colourBN, red.f=0.75, green.f=0.75, blue.f=0.75), colourBN))
-    
+   
+      rect(SEGS_nonrounded$startpos_adjusted, (SEGS_nonrounded$nMajor-0.07), 
+           SEGS_nonrounded$endpos_adjusted, (SEGS_nonrounded$nMajor+0.07), 
+           col=ifelse(SEGS_nonrounded$nMajor>=y_limit, adjustcolor(colourAN, red.f=0.75, green.f=0.75, blue.f=0.75), colourAN), 
+           border=ifelse(SEGS_nonrounded$nMajor>=y_limit, adjustcolor(colourAN, red.f=0.75, green.f=0.75, blue.f=0.75), colourAN))
+      rect(SEGS_nonrounded$startpos_adjusted, (SEGS_nonrounded$nMinor-0.07), 
+           SEGS_nonrounded$endpos_adjusted, (SEGS_nonrounded$nMinor+0.07), 
+           col=ifelse(SEGS_nonrounded$nMinor>=y_limit, adjustcolor(colourBN, red.f=0.75, green.f=0.75, blue.f=0.75), colourBN), 
+           border=ifelse(SEGS_nonrounded$nMinor>=y_limit, adjustcolor(colourBN, red.f=0.75, green.f=0.75, blue.f=0.75), colourBN))
+
   }
   if(!hideSeg){
     rect(SEGS$startpos_adjusted, (SEGS$nMajor-0.07), SEGS$endpos_adjusted, (SEGS$nMajor+0.07), col=ifelse(SEGS$nMajor>=y_limit, adjustcolor(colourA, red.f=0.75, green.f=0.75, blue.f=0.75), colourA), border=ifelse(SEGS$nMajor>=y_limit, adjustcolor(colourA, red.f=0.75, green.f=0.75, blue.f=0.75), colourA))
@@ -147,17 +149,6 @@ ascat.plotAdjustedAscatProfile=function(ASCAT_output_object, REF, SAMPLE, y_limi
   }
    abline(v=c(1, REF$cumul), lty=1, col="lightgrey")
   text(REF$middle, y_limit, REF$chrom, pos = 1, cex = 2)
-  #dev.off()
-  #rm(SEGS, ticks, maintitle)
-  #; rm(SAMPLE)
+ 
 }
-
-#ASCAT_output_object <- 
-# ASCAT_output_object <- ascat.output
-# REF <- "hg38"
-# y_limit=5
-# plot_unrounded=FALSE
-# # png_prefix="test"
-# # 
-# ascat.plotAdjustedAscatProfile(res_ASCAT, REF = "hg38")  
 

@@ -11,6 +11,7 @@ library(shinydashboard)
 library(shinyFiles)
 library(spatstat.geom)
 library(dipsaus)
+library(dplyr)
 #source("plotSunrise2.R")
 #source("myplotSol.R")
 source("PlotASCATAdjusted.R")
@@ -28,12 +29,38 @@ localOpt <- NULL
 logRplot <- NULL
 newPlot <- NULL
 highlight <- NULL
+localOptSeg <- NULL
 options(spinner.color="#0F829F", spinner.color.background="#ffffff", spinner.size=1)
 
 getIndex <- function(sample){
   
   index <- which(names(reslocal$allTracks.processed)==sample)
   return (index)
+  
+}
+
+### Reconstructs the germline genotype calls (ascat.gg) that ascat.aspcf needs, using only
+### information already present in a post-aspcf ASCAT object. The saved .Rda files here don't
+### retain raw Germline_LogR/Germline_BAF (or the original ascat.gg), so ascat.aspcf can't
+### re-derive genotypes internally when we re-run it. Tumor_BAF_segmented[[i]] only ever
+### contains rows for probes that were called heterozygous the first time round, so we can
+### rebuild the exact same TRUE/FALSE (homozygous/heterozygous) mask from that - meaning a
+### re-segmentation only changes the penalty, and doesn't silently re-call genotypes too.
+buildAscatGGFromExisting <- function(ASCATobj) {
+  
+  allProbes <- rownames(ASCATobj$Tumor_LogR)
+  sampleNames <- colnames(ASCATobj$Tumor_LogR)
+  
+  Homozygous <- matrix(TRUE, nrow = length(allProbes), ncol = length(sampleNames),
+                        dimnames = list(allProbes, sampleNames))
+  
+  for (i in seq_along(sampleNames)) {
+    hetProbes <- rownames(ASCATobj$Tumor_BAF_segmented[[i]])
+    hetProbes <- intersect(hetProbes, allProbes)
+    Homozygous[hetProbes, i] <- FALSE
+  }
+  
+  list(germlinegenotypes = Homozygous, failedarrays = NULL)
   
 }
 
@@ -178,6 +205,42 @@ ui <- navbarPage(id="nav_page",
                  
                  #######################################################################
                  
+                 ######################### SEGMENTATION TAB #############################
+                 
+                 #######################################################################
+                 
+                 tabPanel("Segmentation", shinyWidgets::useShinydashboard(),
+                          fluidRow(box(width=12, title="Profile", status="primary", solidHeader=TRUE,
+                                       column(width=8, withSpinner(plotOutput("profileSeg"), type=3)),
+                                       column(width=4, plotOutput("sunriseSeg", height='450px')))
+                          ),
+                          br(),
+                          fluidRow(
+                            column(width = 3, offset = 1,
+                                   selectInput("penalty", "Segmentation penalty (ASPCF)",
+                                               choices = c(25, 50, 70, 100, 150, 200),
+                                               selected = 70)),
+                            column(width = 3,
+                                   br(),
+                                   actionButton("applySeg", label = "Apply segmentation",
+                                                icon = icon("play", verify_fa = FALSE),
+                                                style="color: #FFFFFF ; background-color: #ba4a00; border-color: #0F829F; font-size:100%; border-width: 3px"))
+                          ),
+                          br(),
+                          fluidRow(
+                            column(width = 3, offset = 1,
+                                   actionButton("discardSeg", label = "Discard",
+                                                icon = icon("arrows-rotate", verify_fa = FALSE),
+                                                style="color: #FFFFFF ; background-color: #ba4a00; border-color: #0F829F; font-size:100%; border-width: 3px")),
+                            column(width = 3, offset = 1,
+                                   actionButton("saveSeg", label = "Save segmentation",
+                                                icon = icon("floppy-disk", verify_fa = FALSE),
+                                                style="color: #FFFFFF ; background-color: #ba4a00; border-color: #0F829F; font-size:100%; border-width: 3px"))
+                          ), br(), br()
+                 ),
+                 
+                 #######################################################################
+                 
                  ######################### MODIFIER TAB ################################
                  
                  #######################################################################
@@ -223,7 +286,7 @@ ui <- navbarPage(id="nav_page",
                                                 br(),
                                                 h5("To change the ploidy and purity of the whole sample directly on the Working station profile, please click the point on the sunrise plot corresponding to the desired ploidy/purity values. When 'Automatic optima' is enabled; the closest optimal purity/ploidy pair will be selected."),
                                                 br(),
-                                                checkboxInput("optima", "Automatic optima", FALSE),
+                                                checkboxInput("optima", "Automatic optima", TRUE),
                                                 
                                                  #checkboxInput("sizeP", "Increase size of datapoints", FALSE),
                                                 size= "lg", circle= FALSE, status = "info", label = "Modify purity & ploidy", width = "450px"
@@ -283,8 +346,11 @@ server <- function(input, output, session) {
   vals <- reactiveVal()
   volumes = getVolumes()
   coords <- reactiveValues(x=NULL,y=NULL)
+  segPreview <- reactiveValues(bc=NULL, output=NULL)
   output$profile <- renderPlot(NULL)
   output$profile2 <- renderPlot(NULL)
+  output$profileSeg <- renderPlot(NULL)
+  output$sunriseSeg <- renderPlot(NULL)
   
   observeEvent(input$profile2_click, {
     coords$x <- c(coords$x,input$profile2_click$x)
@@ -380,9 +446,15 @@ server <- function(input, output, session) {
       output$profile2 <- renderPlot({isolate(plot2 <- ascat.plotAdjustedAscatProfile(reslocal$manual, SAMPLE=names(reslocal$manual$purity)[[1]], REF="hg38")) })
       
       #plotScGrid(reslocal$allSolutions[[1]])
-      output$sunrise1 <- renderPlot({isolate(ascat.plotSunrise(reslocal$original$distance_matrix[[1]], psi_opt1 = reslocal$original$ploidy[[1]], rho_opt1 = reslocal$original$purity[[1]]))})
+      output$sunrise1 <- renderPlot({isolate(ascat.plotSunrise(reslocal$original$distance_matrix[[1]], psi_opt1 = reslocal$original$psi[[1]], rho_opt1 = reslocal$original$purity[[1]]))})
       #plotScGrid(reslocal$allSolutions.refitted.manual[[1]])
-      output$sunrise2 <- renderPlot({localOpt <<- isolate( ascat.plotSunrise(reslocal$manual$distance_matrix[[1]], psi_opt1 = reslocal$manual$ploidy[[1]], rho_opt1 = reslocal$manual$purity[[1]], optima=TRUE))})
+      output$sunrise2 <- renderPlot({localOpt <<- isolate( ascat.plotSunrise(reslocal$manual$distance_matrix[[1]], psi_opt1 = reslocal$manual$psi[[1]], rho_opt1 = reslocal$manual$purity[[1]], optima=TRUE))})
+      
+      ### Segmentation tab starts by showing the current manual profile (no pending preview)
+      segPreview$bc <- NULL
+      segPreview$output <- NULL
+      output$profileSeg <- renderPlot({isolate(ascat.plotAdjustedAscatProfile(reslocal$manual, SAMPLE=names(reslocal$original$purity)[[1]], REF="hg38"))})
+      output$sunriseSeg <- renderPlot({isolate(localOptSeg <<- ascat.plotSunrise(reslocal$manual$distance_matrix[[1]], psi_opt1 = reslocal$manual$psi[[1]], rho_opt1 = reslocal$manual$purity[[1]], optima=TRUE))})
       
         
       removeModal()
@@ -391,6 +463,95 @@ server <- function(input, output, session) {
     error=function(e) {
       
     })
+    
+  })
+  
+  #########################################################################
+  
+  ######################## SEGMENTATION ####################################
+  
+  #########################################################################
+  
+  observeEvent(input$applySeg, {
+    
+    showModal(modalDialog(div(tags$b("Resegmenting, please wait...", style = "color: steelblue;")), footer=NULL))
+    on.exit(removeModal())
+    
+    tryCatch({
+      
+      penalty <- as.numeric(input$penalty)
+      
+      ### re-run ASPCF segmentation on the raw signal already stored in bclocal, at the chosen
+      ### penalty, reusing the original heterozygous/homozygous calls (see buildAscatGGFromExisting)
+      gg <- buildAscatGGFromExisting(bclocal)
+      newbc <- ascat.aspcf(bclocal, ascat.gg = gg, penalty = penalty, out.dir = NA)
+      
+      ### re-fit purity/ploidy from scratch on the newly segmented data
+      newoutput <- ascat.runAscat(newbc)
+      
+      segPreview$bc <- newbc
+      segPreview$output <- newoutput
+      
+      output$profileSeg <- renderPlot({isolate(ascat.plotAdjustedAscatProfile(newoutput, SAMPLE=names(newoutput$purity)[[1]], REF="hg38"))})
+      output$sunriseSeg <- renderPlot({isolate(localOptSeg <<- ascat.plotSunrise(newoutput$distance_matrix[[1]], psi_opt1 = newoutput$psi[[1]], rho_opt1 = newoutput$purity[[1]], optima=TRUE))})
+      
+    },
+    error=function(e) {
+      message('An Error Occurred')
+      print(e)
+      shinyalert("Error", "Cannot resegment profile with this penalty value. Please choose a different value", type = "error")
+    },
+    warning=function(w) {
+      message('A Warning Occurred')
+      print(w)
+      shinyalert("Warning", "Resegmentation produced an ambiguous solution: preview may be unreliable", type = "error")
+    })
+    
+  })
+  
+  observeEvent(input$discardSeg, {
+    
+    segPreview$bc <- NULL
+    segPreview$output <- NULL
+    
+    output$profileSeg <- renderPlot({isolate(ascat.plotAdjustedAscatProfile(reslocal$manual, SAMPLE=names(reslocal$original$purity)[[1]], REF="hg38"))})
+    output$sunriseSeg <- renderPlot({isolate(localOptSeg <<- ascat.plotSunrise(reslocal$manual$distance_matrix[[1]], psi_opt1 = reslocal$manual$psi[[1]], rho_opt1 = reslocal$manual$purity[[1]], optima=TRUE))})
+    
+  })
+  
+  observeEvent(input$saveSeg, {
+    
+    if(is.null(segPreview$output)){
+      
+      shinyalert("Nothing to save", "Please apply a segmentation first.", type = "warning")
+      
+    } else {
+      
+      tryCatch({
+        
+        ### this new segmentation becomes the baseline for every future manual purity/ploidy
+        ### and segment refit: bclocal feeds the sunrise-click refit, reslocal$manual feeds
+        ### everything shown/edited on the Modifier tab
+        bclocal <<- segPreview$bc
+        reslocal$manual <<- segPreview$output
+        
+        ### refresh the Modifier tab so it reflects the newly saved segmentation immediately
+        output$profile2 <- renderPlot({isolate(ascat.plotAdjustedAscatProfile(reslocal$manual, SAMPLE=names(reslocal$original$purity)[[1]], REF="hg38", hideSeg=hideCN(), plot_unrounded = plotRawSeg())) })
+        output$sunrise2 <- renderPlot({isolate(localOpt <<- ascat.plotSunrise(reslocal$manual$distance_matrix[[1]], psi_opt1 = reslocal$manual$psi[[1]], rho_opt1 = reslocal$manual$purity[[1]], optima=TRUE))})
+        
+        segPreview$bc <- NULL
+        segPreview$output <- NULL
+        
+        shinyalert("Saved", "The new segmentation has been saved as the manual profile.", type = "success")
+        
+      },
+      error=function(e) {
+        message('An Error Occurred')
+        print(e)
+        shinyalert("Error", "Could not save the new segmentation.", type = "error")
+      })
+      
+    }
     
   })
   
@@ -409,8 +570,10 @@ server <- function(input, output, session) {
       
       output$profile2 <- renderPlot({isolate(plot2 <- ascat.plotAdjustedAscatProfile(reslocal$original, SAMPLE=names(reslocal$original$purity)[[1]], REF="hg38", hideSeg = hideCN(), plot_unrounded = plotRawSeg())) })
       
-      
-      output$sunrise2 <- renderPlot({isolate( localOpt <<- ascat.plotSunrise(reslocal$original$distance_matrix[[1]], psi_opt1 = reslocal$manual$ploidy[[1]], rho_opt1 = reslocal$manual$purity[[1]], optima=TRUE))})
+      ### show the ORIGINAL solution's own psi/purity here (not the manual one being discarded) -
+      ### this was previously mixing reslocal$original's distance matrix with reslocal$manual's
+      ### psi/purity, which put the green X in the wrong place
+      output$sunrise2 <- renderPlot({isolate( localOpt <<- ascat.plotSunrise(reslocal$original$distance_matrix[[1]], psi_opt1 = reslocal$original$psi[[1]], rho_opt1 = reslocal$original$purity[[1]], optima=TRUE))})
       
       
       reslocal$manual <<- reslocal$original
@@ -444,7 +607,9 @@ server <- function(input, output, session) {
       
       res <- reslocal
       bc <- bclocal
-      save(res, bc, file=file)
+      ascat.output <- reslocal
+      ascat.bc <- bclocal
+      save(ascat.output, ascat.bc, file=file)
       #save(res, file=file)
       
     }
@@ -553,12 +718,16 @@ server <- function(input, output, session) {
        
         newprofile <- ascat.runAscat(bclocal, rho_manual=purity, psi_manual=ploidy)
         
-        reslocal$manual$ploidy[[1]] <- ploidy
-        reslocal$manual$purity[[1]] <- purity
-     
-        reslocal$manual$segments <<- newprofile$segments
-      
-        reslocal$manual$psi <<- newprofile$psi
+        ### `ploidy` here is a value read off the distance-matrix grid, i.e. psi (the sample-level
+        ### normalizing ploidy passed as psi_manual above) - NOT the tumour-only ploidy. Storing it
+        ### in $ploidy[[1]] (as before) corrupted that field and made every subsequent sunrise
+        ### render (which reads $ploidy for the X position) line up "by accident". Pull psi, purity
+        ### and the true tumour ploidy from newprofile instead, and keep everything on <<- so the
+        ### change actually persists on the global reslocal.
+        reslocal$manual$psi[[1]]    <<- newprofile$psi[[1]]
+        reslocal$manual$purity[[1]] <<- newprofile$purity[[1]]
+        reslocal$manual$ploidy[[1]] <<- newprofile$ploidy[[1]]
+        reslocal$manual$segments    <<- newprofile$segments
         
         #print(newprofile$distance_matrix[[1]])
         #reslocal$manual$distance_matrix[[1]] <<- newprofile$distance_matrix[[1]]
@@ -569,7 +738,7 @@ server <- function(input, output, session) {
         
         output$profile2 <- renderPlot({isolate(plot2 <- ascat.plotAdjustedAscatProfile(newprofile, SAMPLE=names(reslocal$original$purity)[[1]], REF="hg38", hideSeg=hideCN(), plot_unrounded = plotRawSeg())) })
         
-          output$sunrise2 <- renderPlot({isolate( localOpt <<- ascat.plotSunrise(reslocal$manual$distance_matrix[[1]], psi_opt1 = reslocal$manual$ploidy[[1]], rho_opt1 = reslocal$manual$purity[[1]], optima=TRUE))})
+          output$sunrise2 <- renderPlot({isolate( localOpt <<- ascat.plotSunrise(reslocal$manual$distance_matrix[[1]], psi_opt1 = reslocal$manual$psi[[1]], rho_opt1 = reslocal$manual$purity[[1]], optima=TRUE))})
         
       
       coords$y <<- NULL
@@ -728,35 +897,33 @@ server <- function(input, output, session) {
           refMajor <- NULL
           refMinor <- NULL
           
+          ############# fix #################
+          
           if (segment_info$nMajor == segment_info$nMinor) {
             
             refMajor <- max(y2, y4)
             refMinor <- min(y2, y4)
             
-          }
-          else {
+          } else {
             
-            if(abs(segment_info$nMajor -  y1) <=  abs(segment_info$nMinor - y1)) {
-              refMajor <- y2
-            }
-            else{
+            major_selected_first <- abs(segment_info$nMajor - y1) <= abs(segment_info$nMinor - y1)
+            
+            if (major_selected_first) {
+              refMajor <- y2   # click 1 was near the major-allele line -> click 2 sets its new value
+              refMinor <- y4   # click 3 is assumed to target the other line -> click 4 sets its new value
+            } else {
               refMinor <- y2
-            }
-            
-            if(abs(segment_info$nMajor -  y3) <=  abs(segment_info$nMinor - y3)) {
-              refMinor <- y4
-            }
-            else{
               refMajor <- y4
             }
             
-            
           }
           
+          ###################################
           
-          seg <- reslocal$manual$segments[reslocal$manual$segments$"chr"==chr, ]
-          ind <- which(seg$startpos==segment_info$startpos)
-           
+          #seg <- reslocal$manual$segments[reslocal$manual$segments$"chr"==chr, ]
+          #ind <- which(seg$startpos==segment_info$startpos)
+          seg_raw <- reslocal$manual$segments_raw[reslocal$manual$segments_raw$"chr"==chr, ]
+          ind <- which(seg_raw$startpos <= real_x_pos & seg_raw$endpos >= real_x_pos)[1]
           
           rescopy$manual <- refitProfileASCAT(rescopy$manual, refMinor=refMinor, refMajor=refMajor, chr= chr, gamma=0.55, wm=ind) 
           
@@ -766,7 +933,7 @@ server <- function(input, output, session) {
           
           output$profile2 <- renderPlot({isolate(plot2 <- ascat.plotAdjustedAscatProfile(reslocal$manual, SAMPLE=names(reslocal$original$purity)[[1]], REF="hg38", hideSeg=hideCN(), plot_unrounded = plotRawSeg())) })
           
-          output$sunrise2 <- renderPlot({isolate(localOpt <<- ascat.plotSunrise(reslocal$manual$distance_matrix[[1]], psi_opt1 = reslocal$manual$ploidy[[1]], rho_opt1 = reslocal$manual$purity[[1]]))})
+          output$sunrise2 <- renderPlot({isolate(localOpt <<- ascat.plotSunrise(reslocal$manual$distance_matrix[[1]], psi_opt1 = reslocal$manual$psi[[1]], rho_opt1 = reslocal$manual$purity[[1]]))})
           
           
           coords$y <<- NULL
@@ -816,7 +983,7 @@ server <- function(input, output, session) {
        
         output$profile2 <- renderPlot({isolate(plot2 <- ascat.plotAdjustedAscatProfile(reslocal$manual, SAMPLE=names(reslocal$original$purity)[[1]], REF="hg38", hideSeg=hideCN(), plot_unrounded = plotRawSeg())) })
         
-        output$sunrise2 <- renderPlot({isolate(localOpt <<- ascat.plotSunrise(reslocal$manual$distance_matrix[[1]], psi_opt1 = reslocal$manual$ploidy[[1]], rho_opt1 = reslocal$manual$purity[[1]]))})
+        output$sunrise2 <- renderPlot({isolate(localOpt <<- ascat.plotSunrise(reslocal$manual$distance_matrix[[1]], psi_opt1 = reslocal$manual$psi[[1]], rho_opt1 = reslocal$manual$purity[[1]]))})
         
         
         },

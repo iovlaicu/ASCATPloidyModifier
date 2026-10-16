@@ -6,7 +6,6 @@ myascat.plotSegmentedData = function(ASCATobj, plotLogR=TRUE, logr.y_values=c(-2
     names(AllIDs) = rownames(ASCATobj$Tumor_LogR)
     HetIDs = AllIDs[Select_nonNAs]
     
-    #png(filename = file.path(img.dir, paste(img.prefix, ASCATobj$samples[arraynr], ".ASPCF.png", sep="")), width = 2000, height = 1000, res = 200)
     
     par(mar = c(0.5, 5, 5, 0.5), cex = 0.4, cex.main=3, cex.axis = 2)
     
@@ -54,6 +53,6 @@ myascat.plotSegmentedData = function(ASCATobj, plotLogR=TRUE, logr.y_values=c(-2
       
     }
 
-    #dev.off()
+ 
   }
 }
