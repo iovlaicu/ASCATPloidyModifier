@@ -84,7 +84,9 @@ save(ascat.bc, ascat.output, file = "mySample_ASCAT.Rda")
 
 ### 1. Welcome tab: load your data
 1. Click **Load data** and choose your `.Rda` file.
-2. Click **Start**. Loading the object takes a few seconds, and then the app opens the **Modifier** tab.
+2. Choose the **Data type**: *SNP array* (ASCAT gamma = 0.55) or *Sequencing, WGS/WES* (gamma = 1).
+   This gamma is used for every refit. A file saved by the app remembers its data type.
+3. Click **Start**. Loading the object takes a few seconds, and then the app opens the **Modifier** tab.
 
 Click **Help** on the Welcome tab for a short in-app guide.
 
@@ -105,18 +107,20 @@ bottom panel, the **Modifier Working Station**, which shows a copy-number profil
   local optimum.
 - **Change one segment:** open the modify menu, choose *Modify the copy number of 1 segment*,
   choose the chromosome, enter the **major** and **minor** allele copy numbers and click **Apply**.
-- **Change a segment on the graph:** choose *Modify segment on graph*, click a segment on the
-  Working Station profile and then click where it should be. Repeat for a second segment and click **Apply**.
-  The app refits purity/ploidy so both segments match.
-- **Display options** (plot settings menu): show raw (unrounded) segments, hide the main
-  segments, and overlay the raw **LogR** or **BAF**.
-- **Reset profile:** go back to the original ASCAT solution.
+  The largest segment on that chromosome is set to these values, and purity/ploidy are refitted so that it matches.
+- **Change a segment on the graph:** choose *Modify segment on graph*. On the Working Station profile, click one allele line
+  of a segment and then click its new copy-number level. Next, click the segment's other allele line and then its new level.
+  Click **Apply**, and purity/ploidy are refitted so the segment has the chosen major and minor copy number.
+- **Display options** (plot settings menu): show raw (unrounded) segments or hide the main segments.
+  **View raw LogR** / **View raw BAF** replace the Original panel with the segmented LogR or BAF track.
+- **Reset profile:** go back to the original ASCAT solution, including the original segmentation.
 
 ### 4. Save the result
 Click **Save .Rda** to download `result_manualfitting.Rda`. It contains:
 
 - `ascat.output$original`: the original ASCAT solution
 - `ascat.output$manual`: your modified solution (purity, ploidy, segments, …)
+- `ascat.output$gamma`: the gamma used, which follows from the data type
 - `ascat.bc`: the data object, including any new segmentation you saved
 
 You can load the saved file back into the app to continue editing, or use it in R:

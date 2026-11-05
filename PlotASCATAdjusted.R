@@ -131,9 +131,12 @@ ascat.plotAdjustedAscatProfile=function(ASCAT_output_object, REF, SAMPLE, y_limi
     
     else {
       
-      SEGS=SEGMENTS[which(SEGMENTS$startpos_adjusted <= highlight$x & SEGMENTS$endpos_adjusted >= highlight$x), ]
-      
-      if(SEGS$nMajor == highlight$y) {
+      SEGS=SEGMENTS[which(SEGMENTS$startpos_adjusted <= highlight$x[1] & SEGMENTS$endpos_adjusted >= highlight$x[1]), ][1, ]
+
+      if(is.na(SEGS$nMajor)) {
+        ## click fell between segments: nothing to highlight
+      }
+      else if(abs(SEGS$nMajor - highlight$y[1]) <= abs(SEGS$nMinor - highlight$y[1])) {
         rect(SEGS$startpos_adjusted, (SEGS$nMajor-0.07), SEGS$endpos_adjusted, (SEGS$nMajor+0.07), col=ifelse(SEGS$nMajor>=y_limit, adjustcolor(colourH, red.f=0.75, green.f=0.75, blue.f=0.75), colourH), border=ifelse(SEGS$nMajor>=y_limit, adjustcolor(colourH, red.f=0.75, green.f=0.75, blue.f=0.75), colourH))
         
       }

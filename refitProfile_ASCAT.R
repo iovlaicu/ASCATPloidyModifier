@@ -26,32 +26,36 @@ merge_consecutive_positions <- function(segments) {
       .groups  = "drop"
     )
   
-  merged_list <- list(
+  ## same layout as ASCAT's own $segments data frame
+  merged <- data.frame(
+    sample   = rep(segments_df$sample[1], nrow(merged_df)),
+    chr      = merged_df$chr,
     startpos = merged_df$startpos,
     endpos   = merged_df$endpos,
-    chr      = merged_df$chr,
     nMajor   = merged_df$nMajor,
-    nMinor   = merged_df$nMinor
+    nMinor   = merged_df$nMinor,
+    stringsAsFactors = FALSE
   )
-  
-  merged_list$sample <- rep(segments$sample[1], length(merged_list$startpos))
-  merged_list <- merged_list[c("sample", "startpos", "endpos", "chr", "nMajor", "nMinor")]
-  
-  return(merged_list)
+
+  return(merged)
 }
 
 refitProfileASCAT <- function(ASCATobj, refMinor, refMajor, chr, gamma = 0.55, wm = NULL) {
   
+  if (refMajor == refMinor) {
+    stop("A balanced state (major = minor) carries no allelic imbalance, so it cannot be used to refit purity; choose an unbalanced state")
+  }
+
   segments <- ASCATobj$segments_raw
-  
+
   org_purity <- ASCATobj$purity[[1]]
   org_nA     <- segments[, "nAraw"]
   org_nB     <- segments[, "nBraw"]
-  org_psi    <- ASCATobj$psi[[1]]     # sample-level normalizing ploidy: psi = rho*ploidy + 2*(1-rho)
-  # org_ploidy (tumor-only ploidy, ASCATobj$ploidy[[1]]) is NOT used here â€” LogR is normalized by psi, not ploidy
-  
-   ### LogR = gamma * log2( (rho*(nA+nB) + (1-rho)*2) / psi )
-  LogRref <- gamma * log2((org_purity * (org_nA + org_nB) + (1 - org_purity) * 2) / org_psi)
+  org_psi    <- ASCATobj$psi[[1]]     # ASCAT psi
+
+  ### ASCAT model: LogR = gamma * log2( (2*(1-rho) + rho*(nA+nB)) / (2*(1-rho) + rho*psi) )
+  LogRref <- gamma * log2((org_purity * (org_nA + org_nB) + (1 - org_purity) * 2) /
+                            (2 * (1 - org_purity) + org_purity * org_psi))
   
   ### BAF = (1 - rho + rho*nB) / (2 - 2*rho + rho*(nA+nB))
   refBAF <- (1 - org_purity + org_purity * org_nB) /
@@ -60,7 +64,8 @@ refitProfileASCAT <- function(ASCATobj, refMinor, refMajor, chr, gamma = 0.55, w
   segments$logR <- LogRref
   segments$BAF  <- refBAF
   
-  cn. <- segments[segments$"chr" == chr, ]
+  cn. <- segments[gsub("^chr", "", segments$"chr") == gsub("^chr", "", as.character(chr)), ]
+  if (nrow(cn.) == 0) stop("No segments found on chromosome ", chr)
   sizes <- as.numeric(as.character(cn.$endpos)) - as.numeric(as.character(cn.$startpos))
   
   ### if index of segment on chromosome is not specified, pick the largest segment
@@ -74,18 +79,18 @@ refitProfileASCAT <- function(ASCATobj, refMinor, refMajor, chr, gamma = 0.55, w
   rho <- (2 * BAF_seg - 1) /
     ((2 * BAF_seg - 1) - BAF_seg * (refMajor + refMinor) + refMinor)
   
-  ### --- Solve LogR = gamma*log2((rho*nt+2(1-rho))/psi) for the new psi (sample ploidy) ---
-  psi  <- (2 * (1 - rho) + rho * (refMajor + refMinor)) / (2^(logR_seg / gamma))
-  psit <- (psi - 2 * (1 - rho)) / rho                      # tumor-only ploidy
-  
-  if (!is.finite(psit) || psit <= 0 || !is.finite(rho) || rho <= 0 || rho > 1) {
+  ### --- Solve the LogR equation above for the new psi ---
+  normaliser <- (2 * (1 - rho) + rho * (refMajor + refMinor)) / (2^(logR_seg / gamma))   # = 2*(1-rho) + rho*psi
+  psi <- (normaliser - 2 * (1 - rho)) / rho
+
+  if (!is.finite(psi) || psi <= 0 || !is.finite(rho) || rho <= 0 || rho > 1) {
     stop("Not possible: ploidy<0 or purity \u2209 [0,1]")
   }
-  
-  ### recompute allele-specific copy number for every segment under the new rho/psit,
-  ### holding each segment's (logR, BAF) fixed ---
-  newA <- (rho - 1 - (refBAF - 1) * 2^(LogRref / gamma) * ((1 - rho) * 2 + rho * psit)) / rho
-  newB <- (rho - 1 +  refBAF       * 2^(LogRref / gamma) * ((1 - rho) * 2 + rho * psit)) / rho
+
+  ### recompute allele-specific copy number for every segment under the new rho/psi,
+  ### holding each segment's (logR, BAF) fixed (same formulas as ASCAT) ---
+  newA <- (rho - 1 - (refBAF - 1) * 2^(LogRref / gamma) * ((1 - rho) * 2 + rho * psi)) / rho
+  newB <- (rho - 1 +  refBAF       * 2^(LogRref / gamma) * ((1 - rho) * 2 + rho * psi)) / rho
   
   ASCATobj$segments_raw$nAraw  <- newA
   ASCATobj$segments_raw$nBraw  <- newB
@@ -96,8 +101,11 @@ refitProfileASCAT <- function(ASCATobj, refMinor, refMajor, chr, gamma = 0.55, w
   ASCATobj$segments <- merge_consecutive_positions(ASCATobj$segments_raw)
   
   ASCATobj$purity[[1]] <- rho
-  ASCATobj$ploidy[[1]] <- psit
   ASCATobj$psi[[1]]    <- psi
+  ### tumour ploidy as ASCAT reports it (length-weighted mean total copy number); the app
+  ### replaces it with ASCAT's own probe-weighted value via updatePloidyGoF()
+  len <- as.numeric(ASCATobj$segments_raw$endpos) - as.numeric(ASCATobj$segments_raw$startpos)
+  ASCATobj$ploidy[[1]] <- sum((newA + newB) * len) / sum(len)
   
   return(ASCATobj)
 }

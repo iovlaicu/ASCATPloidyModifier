@@ -22,6 +22,7 @@ source("plotSegmentedASCAT.R")
 
 reslocal <- NULL
 bclocal <- NULL
+bcoriginal <- NULL
 pathrdata <- NULL
 rdata <- NULL
 coords <- NULL
@@ -39,13 +40,8 @@ getIndex <- function(sample){
   
 }
 
-### Reconstructs the germline genotype calls (ascat.gg) that ascat.aspcf needs, using only
-### information already present in a post-aspcf ASCAT object. The saved .Rda files here don't
-### retain raw Germline_LogR/Germline_BAF (or the original ascat.gg), so ascat.aspcf can't
-### re-derive genotypes internally when we re-run it. Tumor_BAF_segmented[[i]] only ever
-### contains rows for probes that were called heterozygous the first time round, so we can
-### rebuild the exact same TRUE/FALSE (homozygous/heterozygous) mask from that - meaning a
-### re-segmentation only changes the penalty, and doesn't silently re-call genotypes too.
+### Rebuilds the germline genotype calls (ascat.gg) needed by ascat.aspcf from a segmented ASCAT object:
+### probes present in Tumor_BAF_segmented are heterozygous, all others homozygous.
 buildAscatGGFromExisting <- function(ASCATobj) {
   
   allProbes <- rownames(ASCATobj$Tumor_LogR)
@@ -62,6 +58,16 @@ buildAscatGGFromExisting <- function(ASCATobj) {
   
   list(germlinegenotypes = Homozygous, failedarrays = NULL)
   
+}
+
+### After a segment refit, take tumour ploidy and goodness of fit from ASCAT at the new purity/psi
+### so they are defined exactly as in ASCAT (copy numbers stay as refitted)
+updatePloidyGoF <- function(ASCATres, ASCATobj, gamma) {
+  fit <- suppressWarnings(ascat.runAscat(ASCATobj, gamma = gamma, rho_manual = ASCATres$purity[[1]],
+                                         psi_manual = ASCATres$psi[[1]], img.dir = tempdir()))
+  ASCATres$ploidy[[1]] <- fit$ploidy[[1]]
+  ASCATres$goodnessOfFit[[1]] <- fit$goodnessOfFit[[1]]
+  ASCATres
 }
 
 getSamples <- function() {
@@ -187,8 +193,14 @@ ui <- navbarPage(id="nav_page",
                                                                       size= "lg", circle= FALSE, status = "info", label = "Help", width = "1200px", inputId="help")),
                                    column(6, align="center", shinyFilesButton("get_file", "Load data" ,
                                                                               title = "Choose the ASCAT rdata object to load", multiple = FALSE,
-                                                                              buttonType = "primary", class = NULL, style = "width:60px, height: 50px")
-                                          
+                                                                              buttonType = "primary", class = NULL, style = "width:60px, height: 50px"),
+                                          br(), br(),
+                                          div(style = "display:inline-block; text-align:left; background-color: rgba(255,255,255,0.85); padding: 8px 16px; border-radius: 6px;",
+                                              radioButtons("dataType", "Data type",
+                                                           choices = c("SNP array (gamma = 0.55)" = "0.55",
+                                                                       "Sequencing, WGS/WES (gamma = 1)" = "1"),
+                                                           selected = "0.55"))
+
                                    )),
                           br(), div(style = "height:100px"),
                           fluidRow(column(6, align="center", offset = 3,
@@ -301,7 +313,7 @@ ui <- navbarPage(id="nav_page",
                                                          selectInput(
                                                            "Chr",
                                                            "Choose the chromosome",
-                                                           c(1:22, "X", "Y"),
+                                                           c(1:22, "X"),
                                                            selected = NULL,
                                                            multiple = FALSE,
                                                            selectize = FALSE,
@@ -366,6 +378,7 @@ server <- function(input, output, session) {
     input$samples
   })
   optValue <- reactive({input$optima})
+  gammaVal <- reactive({ as.numeric(input$dataType) })
   result <- reactive({ reslocal })
   
   shiftv <- reactive({
@@ -420,18 +433,26 @@ server <- function(input, output, session) {
       reslocal <<- ascat.output
       
       bclocal <<- ascat.bc
-      
+      bcoriginal <<- ascat.bc
+
       updateSelectInput(session, "samples", label=NULL,
                         choices=getSamples())
-     
-      
+
+
       if(!"manual"%in%names(reslocal))
       {
         original <- reslocal
         reslocal <<- NULL
         reslocal$original <<- original
         reslocal$manual <<- original
-  
+
+      }
+
+      ### a file saved by this app records the data type (gamma) it was fitted with
+      if(!is.null(reslocal$gamma) && !isTRUE(all.equal(as.numeric(reslocal$gamma), gammaVal()))){
+        updateRadioButtons(session, "dataType", selected = as.character(reslocal$gamma))
+        shinyalert("Data type", paste0("This file was saved with gamma = ", reslocal$gamma,
+                                       "; the data type has been set accordingly."), type = "info")
       }
       
       # if(!"manual"%in%names(bclocal))
@@ -487,7 +508,7 @@ server <- function(input, output, session) {
       newbc <- ascat.aspcf(bclocal, ascat.gg = gg, penalty = penalty, out.dir = NA)
       
       ### re-fit purity/ploidy from scratch on the newly segmented data
-      newoutput <- ascat.runAscat(newbc)
+      newoutput <- ascat.runAscat(newbc, gamma = gammaVal(), img.dir = tempdir())
       
       segPreview$bc <- newbc
       segPreview$output <- newoutput
@@ -570,14 +591,17 @@ server <- function(input, output, session) {
       
       output$profile2 <- renderPlot({isolate(plot2 <- ascat.plotAdjustedAscatProfile(reslocal$original, SAMPLE=names(reslocal$original$purity)[[1]], REF="hg38", hideSeg = hideCN(), plot_unrounded = plotRawSeg())) })
       
-      ### show the ORIGINAL solution's own psi/purity here (not the manual one being discarded) -
-      ### this was previously mixing reslocal$original's distance matrix with reslocal$manual's
-      ### psi/purity, which put the green X in the wrong place
       output$sunrise2 <- renderPlot({isolate( localOpt <<- ascat.plotSunrise(reslocal$original$distance_matrix[[1]], psi_opt1 = reslocal$original$psi[[1]], rho_opt1 = reslocal$original$purity[[1]], optima=TRUE))})
-      
-      
+
+
       reslocal$manual <<- reslocal$original
-      #bclocal$manual <<- bclocal
+
+      ### also drop any saved re-segmentation and refresh the Segmentation tab
+      bclocal <<- bcoriginal
+      segPreview$bc <- NULL
+      segPreview$output <- NULL
+      output$profileSeg <- renderPlot({isolate(ascat.plotAdjustedAscatProfile(reslocal$original, SAMPLE=names(reslocal$original$purity)[[1]], REF="hg38"))})
+      output$sunriseSeg <- renderPlot({isolate(localOptSeg <<- ascat.plotSunrise(reslocal$original$distance_matrix[[1]], psi_opt1 = reslocal$original$psi[[1]], rho_opt1 = reslocal$original$purity[[1]], optima=TRUE))})
     
     #}
       coords$y <<- NULL
@@ -608,6 +632,7 @@ server <- function(input, output, session) {
       res <- reslocal
       bc <- bclocal
       ascat.output <- reslocal
+      ascat.output$gamma <- gammaVal()
       ascat.bc <- bclocal
       save(ascat.output, ascat.bc, file=file)
       #save(res, file=file)
@@ -716,18 +741,13 @@ server <- function(input, output, session) {
           
         }
        
-        newprofile <- ascat.runAscat(bclocal, rho_manual=purity, psi_manual=ploidy)
-        
-        ### `ploidy` here is a value read off the distance-matrix grid, i.e. psi (the sample-level
-        ### normalizing ploidy passed as psi_manual above) - NOT the tumour-only ploidy. Storing it
-        ### in $ploidy[[1]] (as before) corrupted that field and made every subsequent sunrise
-        ### render (which reads $ploidy for the X position) line up "by accident". Pull psi, purity
-        ### and the true tumour ploidy from newprofile instead, and keep everything on <<- so the
-        ### change actually persists on the global reslocal.
-        reslocal$manual$psi[[1]]    <<- newprofile$psi[[1]]
-        reslocal$manual$purity[[1]] <<- newprofile$purity[[1]]
-        reslocal$manual$ploidy[[1]] <<- newprofile$ploidy[[1]]
-        reslocal$manual$segments    <<- newprofile$segments
+        newprofile <- ascat.runAscat(bclocal, gamma = gammaVal(), rho_manual=purity, psi_manual=ploidy, img.dir = tempdir())
+
+        ### the grid value is psi (sample-level ploidy); take the full refitted solution from
+        ### newprofile and keep the sunrise distance matrix of the current segmentation
+        dm <- reslocal$manual$distance_matrix
+        reslocal$manual <<- newprofile
+        reslocal$manual$distance_matrix <<- dm
         
         #print(newprofile$distance_matrix[[1]])
         #reslocal$manual$distance_matrix[[1]] <<- newprofile$distance_matrix[[1]]
@@ -748,11 +768,13 @@ server <- function(input, output, session) {
         message('An Error Occurred')
         print(e)
         shinyalert("Error", "Cannot fit profile: ploidy<0 or purity ∉ [0,1]. Please choose different values", type = "error")
+        coords$x <<- NULL; coords$y <<- NULL; highlight <<- NULL
       },
       warning=function(w) {
         message('A Warning Occurred')
         print(w)
         shinyalert("Warning", "New solution is ambiguous: reverted to old one", type = "error")
+        coords$x <<- NULL; coords$y <<- NULL; highlight <<- NULL
       })
   
     
@@ -878,15 +900,20 @@ server <- function(input, output, session) {
           REF$add=cumsum(as.numeric(c(0, REF$size[1:(nrow(REF)-1)])))
           
            
-          chr <- length(REF[REF$add <= as.numeric(coords$x[1]), "chrom"])
-          
-          real_x_pos <- as.numeric(coords$x[1] - REF$add[which(REF$chrom==chr)])
-          
-          
+          if (length(coords$x) < 4) stop("Please click 4 times on the profile before applying")
+
+          chr_index <- sum(REF$add <= as.numeric(coords$x[1]))
+          chr <- REF$chrom[chr_index]
+
+          real_x_pos <- as.numeric(coords$x[1] - REF$add[chr_index])
+
+
           rescopy <- reslocal
           rescopy$original <- rescopy$manual
-          
-          segment_info <- reslocal$manual$segments[reslocal$manual$segments$startpos <= real_x_pos & reslocal$manual$segments$endpos >= real_x_pos & reslocal$manual$segments$chr == chr, ]
+
+          segment_info <- reslocal$manual$segments[reslocal$manual$segments$startpos <= real_x_pos & reslocal$manual$segments$endpos >= real_x_pos & gsub("^chr", "", reslocal$manual$segments$chr) == chr, ]
+          if (length(segment_info$nMajor) == 0) stop("No segment at the clicked position")
+          segment_info <- lapply(segment_info, `[`, 1)
           #chr <- segment_info$chr
           #y2 <- round(coords$y[1], digits=0)
           y1 <- coords$y[1]
@@ -896,8 +923,6 @@ server <- function(input, output, session) {
           
           refMajor <- NULL
           refMinor <- NULL
-          
-          ############# fix #################
           
           if (segment_info$nMajor == segment_info$nMinor) {
             
@@ -917,15 +942,15 @@ server <- function(input, output, session) {
             }
             
           }
-          
-          ###################################
-          
+
           #seg <- reslocal$manual$segments[reslocal$manual$segments$"chr"==chr, ]
           #ind <- which(seg$startpos==segment_info$startpos)
-          seg_raw <- reslocal$manual$segments_raw[reslocal$manual$segments_raw$"chr"==chr, ]
+          seg_raw <- reslocal$manual$segments_raw[gsub("^chr", "", reslocal$manual$segments_raw$"chr")==chr, ]
           ind <- which(seg_raw$startpos <= real_x_pos & seg_raw$endpos >= real_x_pos)[1]
-          
-          rescopy$manual <- refitProfileASCAT(rescopy$manual, refMinor=refMinor, refMajor=refMajor, chr= chr, gamma=0.55, wm=ind) 
+          if (is.na(ind)) stop("No segment at the clicked position")
+
+          rescopy$manual <- refitProfileASCAT(rescopy$manual, refMinor=refMinor, refMajor=refMajor, chr= chr, gamma=gammaVal(), wm=ind)
+          rescopy$manual <- updatePloidyGoF(rescopy$manual, bclocal, gammaVal())
           
           rescopy$original <- reslocal$original
           
@@ -933,9 +958,9 @@ server <- function(input, output, session) {
           
           output$profile2 <- renderPlot({isolate(plot2 <- ascat.plotAdjustedAscatProfile(reslocal$manual, SAMPLE=names(reslocal$original$purity)[[1]], REF="hg38", hideSeg=hideCN(), plot_unrounded = plotRawSeg())) })
           
-          output$sunrise2 <- renderPlot({isolate(localOpt <<- ascat.plotSunrise(reslocal$manual$distance_matrix[[1]], psi_opt1 = reslocal$manual$psi[[1]], rho_opt1 = reslocal$manual$purity[[1]]))})
-          
-          
+          output$sunrise2 <- renderPlot({isolate(localOpt <<- ascat.plotSunrise(reslocal$manual$distance_matrix[[1]], psi_opt1 = reslocal$manual$psi[[1]], rho_opt1 = reslocal$manual$purity[[1]], optima=TRUE))})
+
+
           coords$y <<- NULL
           coords$x <<- NULL
         
@@ -944,12 +969,14 @@ server <- function(input, output, session) {
         error=function(e) {
           message('An Error Occurred')
           print(e)
-          shinyalert("Error", "Cannot fit profile: ploidy<0 or purity ∉ [0,1]. Please choose different values", type = "error")
+          shinyalert("Error", paste0(conditionMessage(e), ". Please choose different values"), type = "error")
+          coords$x <<- NULL; coords$y <<- NULL; highlight <<- NULL
         },
         warning=function(w) {
           message('A Warning Occurred')
           print(w)
           shinyalert("Warning", "New solution is ambiguous: reverted to old one", type = "error")
+          coords$x <<- NULL; coords$y <<- NULL; highlight <<- NULL
         })
    
   
@@ -963,19 +990,25 @@ server <- function(input, output, session) {
   
   observeEvent(input$modify,{
     
-    vals <- as.numeric(chrs())
-    
-    
-    if(! is.null(chrs())){
+    sel <- chrs()
+
+
+    if(! is.null(sel)){
       #index <- getIndex(sampleName())
       tryCatch(
         {
-         
+
+        selChr   <- as.character(sel[[1]])
+        selMajor <- suppressWarnings(as.numeric(sel[[2]]))
+        selMinor <- suppressWarnings(as.numeric(sel[[3]]))
+        if (is.na(selMajor) || is.na(selMinor)) stop("Major and minor copy numbers must be numbers")
+
         rescopy <- reslocal
         rescopy$original <- rescopy$manual
-        
-       
-        rescopy$manual <- refitProfileASCAT(rescopy$manual, refMinor=vals[[3]], refMajor=vals[[2]], chr= vals[[1]], gamma=0.55) 
+
+
+        rescopy$manual <- refitProfileASCAT(rescopy$manual, refMinor=selMinor, refMajor=selMajor, chr= selChr, gamma=gammaVal())
+        rescopy$manual <- updatePloidyGoF(rescopy$manual, bclocal, gammaVal())
         
         rescopy$original <- reslocal$original
        
@@ -983,14 +1016,14 @@ server <- function(input, output, session) {
        
         output$profile2 <- renderPlot({isolate(plot2 <- ascat.plotAdjustedAscatProfile(reslocal$manual, SAMPLE=names(reslocal$original$purity)[[1]], REF="hg38", hideSeg=hideCN(), plot_unrounded = plotRawSeg())) })
         
-        output$sunrise2 <- renderPlot({isolate(localOpt <<- ascat.plotSunrise(reslocal$manual$distance_matrix[[1]], psi_opt1 = reslocal$manual$psi[[1]], rho_opt1 = reslocal$manual$purity[[1]]))})
-        
-        
+        output$sunrise2 <- renderPlot({isolate(localOpt <<- ascat.plotSunrise(reslocal$manual$distance_matrix[[1]], psi_opt1 = reslocal$manual$psi[[1]], rho_opt1 = reslocal$manual$purity[[1]], optima=TRUE))})
+
+
         },
         error=function(e) {
           message('An Error Occurred')
           print(e)
-          shinyalert("Error", "Cannot fit profile: ploidy<0 or purity ∉ [0,1]. Please choose different values", type = "error")
+          shinyalert("Error", paste0(conditionMessage(e), ". Please choose different values"), type = "error")
         },
         warning=function(w) {
           message('A Warning Occurred')
